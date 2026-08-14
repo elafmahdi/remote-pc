@@ -146,6 +146,61 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Configure Remote PC
+        shell: pwsh
+        env:
+          REMOTE_PC_SERVER: ${{ secrets.RENDEZVOUS_SERVER }}
+          REMOTE_PC_KEY: ${{ secrets.RS_PUB_KEY }}
+        run: |
+          $path = "libs/hbb_common/src/config.rs"
+          $text = Get-Content -Path $path -Raw
+
+          if ([string]::IsNullOrWhiteSpace($env:REMOTE_PC_SERVER)) {
+            throw "RENDEZVOUS_SERVER repository secret is empty or missing."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:REMOTE_PC_KEY)) {
+            throw "RS_PUB_KEY repository secret is empty or missing."
+          }
+
+          $original = $text
+
+          $text = [regex]::Replace(
+            $text,
+            'pub static ref APP_NAME:\s*RwLock<String>\s*=\s*RwLock::new\("RustDesk"\.to_owned\(\)\);',
+            'pub static ref APP_NAME: RwLock<String> = RwLock::new("RemotePC".to_owned());'
+          )
+
+          $text = [regex]::Replace(
+            $text,
+            'pub const RENDEZVOUS_SERVERS:\s*&\[&str\]\s*=\s*&\[[^;]*\];',
+            'pub const RENDEZVOUS_SERVERS: &[&str] = &["' + $env:REMOTE_PC_SERVER + '"];'
+          )
+
+          $text = [regex]::Replace(
+            $text,
+            'pub const RS_PUB_KEY:\s*&str\s*=\s*"[^"]*";',
+            'pub const RS_PUB_KEY: &str = "' + $env:REMOTE_PC_KEY + '";'
+          )
+
+          if ($text -eq $original) {
+            throw "Remote PC configuration was not applied. config.rs patterns may have changed upstream."
+          }
+
+          if ($text -notmatch [regex]::Escape($env:REMOTE_PC_SERVER)) {
+            throw "Failed to configure RENDEZVOUS_SERVERS."
+          }
+
+          if ($text -notmatch 'pub static ref APP_NAME:.*RemotePC') {
+            throw "Failed to configure APP_NAME."
+          }
+
+          # Do not print the public key value to the GitHub Actions log.
+          Set-Content -Path $path -Value $text -Encoding utf8
+
+          Write-Host "Remote PC configuration applied successfully."
+          Select-String -Path $path -Pattern 'APP_NAME|RENDEZVOUS_SERVERS'
+
       - name: Restore bridge files
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
